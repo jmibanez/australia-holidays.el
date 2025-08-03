@@ -5,7 +5,7 @@
 ;; Author: JM Ibañez <jm@jmibanez.com>
 ;; URL: https://github.com/jmibanez/australia-holidays.el
 ;; Version: 1.0.0
-;; Package-Requires: ((emacs "24.1"))
+;; Package-Requires: ((emacs "24.3"))
 ;; Keywords: calendar
 
 ;; This file is free software; you can redistribute it and/or modify
@@ -39,7 +39,8 @@
 
 (eval-when-compile
   (require 'calendar)
-  (require 'holidays))
+  (require 'holidays)
+  (require 'cl-lib))
 
 ;;;###autoload
 (defcustom australia-holidays-january-26-label "Australia Day"
@@ -54,16 +55,87 @@
   :group 'calendar)
 
 ;;;###autoload
-(defvar australia-holidays
+(defcustom australia-holidays-states-to-include nil
+  "List of Australian states/territories to include in `australia-holidays`.
+Possible values are symbols: :act, :nsw, :nt, :qld, :sa, :tas, :vic, :wa.
+If nil, only national holidays are included."
+  :type '(repeat (choice
+                  (const :tag "Australian Capital Territory" :act)
+                  (const :tag "New South Wales" :nsw)
+                  (const :tag "Northern Territory" :nt)
+                  (const :tag "Queensland" :qld)
+                  (const :tag "South Australia" :sa)
+                  (const :tag "Tasmania" :tas)
+                  (const :tag "Victoria" :vic)
+                  (const :tag "Western Australia" :wa)))
+  :group 'calendar)
+
+(defvar australia-holidays-state-alist
+  '((:act . australia-holidays-for-act)
+    (:nsw . australia-holidays-for-nsw)
+    (:nt  . australia-holidays-for-nt)
+    (:qld . australia-holidays-for-qld)
+    (:sa  . australia-holidays-for-sa)
+    (:tas . australia-holidays-for-tas)
+    (:vic . australia-holidays-for-vic)
+    (:wa  . australia-holidays-for-wa))
+  "Alist mapping Australian state/territory symbols to their holiday variables.")
+
+(defun australia-holidays--resolve (sym)
+  "Resolve SYM (a variable or list) to a holiday list."
+  (let ((val (symbol-value sym)))
+    (if (and (listp val) (symbolp (car val)))
+        (mapcan #'australia-holidays--resolve val)
+      val)))
+
+(defun australia-holidays--for-states (states)
+  "Return a merged list of holidays for STATES (list of symbols)."
+  (let ((holidays
+         (mapcan (lambda (state)
+                   (let ((var (cdr (assoc state australia-holidays-state-alist))))
+                     (when var (australia-holidays--resolve var))))
+                 states)))
+    ;; Remove duplicate holidays by label and main date
+    (cl-remove-duplicates holidays
+                         :test (lambda (h1 h2)
+                                 (equal (list (nth 0 h1) (nth 1 h1) (nth 2 h1))
+                                        (list (nth 0 h2) (nth 1 h2) (nth 2 h2)))))))
+
+(defvar australia-holidays--national
   '((holiday-fixed 1 1 "New Year")
     (if australia-holidays-include-january-26
-      (holiday-fixed 1 26 australia-holidays-january-26-label))
+        (holiday-fixed 1 26 australia-holidays-january-26-label))
     (holiday-easter-etc -2 "Good Friday")
     (holiday-easter-etc 1 "Easter Monday")
     (holiday-fixed 4 25 "ANZAC Day")
     (holiday-fixed 12 25 "Christmas Day"))
-  "Australian holidays.
-Only provides holidays that are valid in all states and territories.")
+  "Holidays valid in all states and territories.")
+
+;;;###autoload
+(defvar australia-holidays nil
+  "Australian holidays based on `australia-holidays-states-to-include`.")
+
+(defun australia-holidays--update ()
+  "Update `australia-holidays` according to `australia-holidays-states-to-include`."
+  (setq australia-holidays
+        (if (and australia-holidays-states-to-include
+                 (listp australia-holidays-states-to-include)
+                 australia-holidays-states-to-include)
+            (australia-holidays--for-states australia-holidays-states-to-include)
+          (let ((national (symbol-value 'australia-holidays--national)))
+            (or national
+                '((holiday-fixed 1 1 "New Year")
+                  (if australia-holidays-include-january-26
+                      (holiday-fixed 1 26 australia-holidays-january-26-label))
+                  (holiday-easter-etc -2 "Good Friday")
+                  (holiday-easter-etc 1 "Easter Monday")
+                  (holiday-fixed 4 25 "ANZAC Day")
+                  (holiday-fixed 12 25 "Christmas Day")))))))
+
+(defun australia-holidays--states-setter (sym val)
+  (set-default sym val)
+  (australia-holidays--update))
+(put 'australia-holidays-states-to-include 'custom-set #'australia-holidays--states-setter)
 
 ;;;###autoload
 (defvar australia-holidays-for-act
